@@ -1,0 +1,21 @@
+url: https://myapp.example.com
+specs: ./specs
+
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key: ${ANTHROPIC_API_KEY}
+
+playwright:
+  headless: true
+  viewport:
+    width: 1280
+    height: 720
+
+reports:
+  junit: ./reports/junit.xml
+  html: ./reports/report.html
+
+explore:
+  max_steps: 100    # max browser actions in exploratory mode
+  focus: []         # optional: paths/areas to focus on
