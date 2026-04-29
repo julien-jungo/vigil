@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 	}
 	testBin = bin
 	code := m.Run()
-	os.RemoveAll(dir)
+	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
 
@@ -51,7 +51,7 @@ func buildBinary() (string, string, error) {
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	cmd.Dir = "."
 	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return "", "", fmt.Errorf("%w\n%s", err, out)
 	}
 	return bin, dir, nil
