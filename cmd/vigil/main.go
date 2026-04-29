@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 )
@@ -8,7 +9,10 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--version" {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+
+	if *showVersion {
 		fmt.Printf("vigil %s\n", version)
 		return
 	}

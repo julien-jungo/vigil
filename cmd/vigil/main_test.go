@@ -8,13 +8,22 @@ import (
 	"testing"
 )
 
-func TestVersion(t *testing.T) {
-	bin, err := buildBinary(t)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
+var testBin string
 
-	out, err := exec.Command(bin, "--version").Output()
+func TestMain(m *testing.M) {
+	bin, dir, err := buildBinary()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build failed: %v\n", err)
+		os.Exit(1)
+	}
+	testBin = bin
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+func TestVersion(t *testing.T) {
+	out, err := exec.Command(testBin, "--version").Output()
 	if err != nil {
 		t.Fatalf("vigil --version: %v", err)
 	}
@@ -26,26 +35,24 @@ func TestVersion(t *testing.T) {
 }
 
 func TestNoArgs(t *testing.T) {
-	bin, err := buildBinary(t)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-
-	cmd := exec.Command(bin)
+	cmd := exec.Command(testBin)
 	cmd.Stdout = os.Stdout
-	err = cmd.Run()
-	if err == nil {
+	if err := cmd.Run(); err == nil {
 		t.Fatal("expected non-zero exit code without arguments")
 	}
 }
 
-func buildBinary(t *testing.T) (string, error) {
-	t.Helper()
-	bin := t.TempDir() + "/vigil"
+func buildBinary() (string, string, error) {
+	dir, err := os.MkdirTemp("", "vigil-test-*")
+	if err != nil {
+		return "", "", err
+	}
+	bin := dir + "/vigil"
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	cmd.Dir = "."
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("%w\n%s", err, out)
+		os.RemoveAll(dir)
+		return "", "", fmt.Errorf("%w\n%s", err, out)
 	}
-	return bin, nil
+	return bin, dir, nil
 }
