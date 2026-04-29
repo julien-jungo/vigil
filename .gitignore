@@ -1,4 +1,16 @@
+# binary
 /vigil
 /dist/
+
+# test
 *.test
 *.out
+
+# env
+.env
+.env.*
+
+# editor
+.idea/
+.vscode/
+
