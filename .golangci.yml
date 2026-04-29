@@ -12,17 +12,16 @@ linters:
     - goimports
     - misspell
     - revive
-
-linters-settings:
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: github.com/julien-jungo/vigil
-  revive:
-    rules:
-      - name: exported
-      - name: var-naming
-      - name: indent-error-flow
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes: github.com/julien-jungo/vigil
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: indent-error-flow
 
 issues:
   max-issues-per-linter: 0
