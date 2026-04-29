@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1
+# Runtime image used by GoReleaser (binary is pre-built and injected by GoReleaser).
+
+FROM mcr.microsoft.com/playwright:v1.51.0-noble
+
+RUN npm install -g @playwright/mcp@0.0.71
+
+COPY vigil /usr/local/bin/vigil
+
+ENTRYPOINT ["vigil"]

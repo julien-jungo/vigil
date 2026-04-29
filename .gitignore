@@ -1,1 +1,4 @@
 /vigil
+/dist/
+*.test
+*.out
