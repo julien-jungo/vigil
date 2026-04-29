@@ -1,0 +1,64 @@
+version: 2
+
+project_name: vigil
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: vigil
+    main: ./cmd/vigil
+    binary: vigil
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: vigil
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: julien-jungo
+    name: vigil
+  draft: false
+  prerelease: auto
+
+dockers:
+  - id: vigil-amd64
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - "ghcr.io/julien-jungo/vigil:latest"
+      - "ghcr.io/julien-jungo/vigil:{{ .Tag }}"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/julien-jungo/vigil"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
