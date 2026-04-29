@@ -1,21 +1,26 @@
+# required
 url: https://myapp.example.com
+
+# optional (default: ./specs)
 specs: ./specs
 
 llm:
-  provider: anthropic
-  model: claude-sonnet-4-20250514
-  api_key: ${ANTHROPIC_API_KEY}
+  provider: anthropic            # required
+  model: claude-sonnet-4-6       # required
+  api_key: ${ANTHROPIC_API_KEY}  # required
 
+# optional
 playwright:
   headless: true
   viewport:
     width: 1280
     height: 720
 
+# optional
 reports:
   junit: ./reports/junit.xml
   html: ./reports/report.html
 
+# optional
 explore:
-  max_steps: 100    # max browser actions in exploratory mode
-  focus: []         # optional: paths/areas to focus on
+  max_steps: 100
