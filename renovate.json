@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 6am on Monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Group Go module and toolchain patch updates into a single PR",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "Go module and toolchain patch updates",
+      "automerge": false
+    },
+    {
+      "description": "Group GitHub Actions patch updates into a single PR",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "GitHub Actions patch updates",
+      "automerge": false
+    },
+    {
+      "description": "Group Docker image patch updates into a single PR",
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "Docker image patch updates",
+      "automerge": false
+    }
+  ]
+}
