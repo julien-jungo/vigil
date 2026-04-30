@@ -5,25 +5,19 @@
   "labels": ["dependencies"],
   "packageRules": [
     {
-      "description": "Group Go module and toolchain patch updates into a single PR",
       "matchManagers": ["gomod"],
       "matchUpdateTypes": ["patch"],
-      "groupName": "Go module and toolchain patch updates",
-      "automerge": false
+      "groupName": "Go module and toolchain patch updates"
     },
     {
-      "description": "Group GitHub Actions patch updates into a single PR",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["patch"],
-      "groupName": "GitHub Actions patch updates",
-      "automerge": false
+      "groupName": "GitHub Actions patch updates"
     },
     {
-      "description": "Group Docker image patch updates into a single PR",
       "matchManagers": ["dockerfile"],
       "matchUpdateTypes": ["patch"],
-      "groupName": "Docker image patch updates",
-      "automerge": false
+      "groupName": "Docker image patch updates"
     }
   ]
 }
