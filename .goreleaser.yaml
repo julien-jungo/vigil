@@ -52,8 +52,8 @@ dockers:
     goos: linux
     goarch: amd64
     image_templates:
-      - "ghcr.io/julien-jungo/vigil:latest"
-      - "ghcr.io/julien-jungo/vigil:{{ .Tag }}"
+      - "ghcr.io/julien-jungo/vigil:latest-amd64"
+      - "ghcr.io/julien-jungo/vigil:{{ .Tag }}-amd64"
     dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/amd64"
@@ -62,3 +62,27 @@ dockers:
       - "--label=org.opencontainers.image.source=https://github.com/julien-jungo/vigil"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
+  - id: vigil-arm64
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - "ghcr.io/julien-jungo/vigil:latest-arm64"
+      - "ghcr.io/julien-jungo/vigil:{{ .Tag }}-arm64"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/julien-jungo/vigil"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+
+docker_manifests:
+  - name_template: "ghcr.io/julien-jungo/vigil:latest"
+    image_templates:
+      - "ghcr.io/julien-jungo/vigil:latest-amd64"
+      - "ghcr.io/julien-jungo/vigil:latest-arm64"
+  - name_template: "ghcr.io/julien-jungo/vigil:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/julien-jungo/vigil:{{ .Tag }}-amd64"
+      - "ghcr.io/julien-jungo/vigil:{{ .Tag }}-arm64"
