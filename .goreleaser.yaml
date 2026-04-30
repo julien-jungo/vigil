@@ -55,9 +55,10 @@ dockers:
     image_templates:
       - "ghcr.io/julien-jungo/vigil:latest-amd64"
       - "ghcr.io/julien-jungo/vigil:{{ .Tag }}-amd64"
-    dockerfile: Dockerfile.goreleaser
+    dockerfile: Dockerfile
     build_flag_templates:
       - "--platform=linux/amd64"
+      - "--build-arg=PREBUILT=1"
       - "--cache-from=type=gha,scope=docker-vigil-amd64"
       - "--cache-to=type=gha,mode=max,scope=docker-vigil-amd64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
@@ -72,9 +73,10 @@ dockers:
     image_templates:
       - "ghcr.io/julien-jungo/vigil:latest-arm64"
       - "ghcr.io/julien-jungo/vigil:{{ .Tag }}-arm64"
-    dockerfile: Dockerfile.goreleaser
+    dockerfile: Dockerfile
     build_flag_templates:
       - "--platform=linux/arm64"
+      - "--build-arg=PREBUILT=1"
       - "--cache-from=type=gha,scope=docker-vigil-arm64"
       - "--cache-to=type=gha,mode=max,scope=docker-vigil-arm64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"

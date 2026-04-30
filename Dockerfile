@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# ── Build stage ───────────────────────────────────────────────────────────────
+ARG PREBUILT=0
+
+# ── Build stage (used when PREBUILT=0) ────────────────────────────────────────
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
@@ -14,6 +16,15 @@ COPY . .
 
 ARG VERSION=dev
 RUN make build VERSION=${VERSION}
+
+# ── Binary selection ──────────────────────────────────────────────────────────
+FROM scratch AS binary-0
+COPY --from=builder /app/vigil /vigil
+
+FROM scratch AS binary-1
+COPY vigil /vigil
+
+FROM binary-${PREBUILT} AS binary
 
 # ── MCP install stage ─────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/playwright:v1.51.0-noble AS mcp-installer
@@ -33,6 +44,6 @@ COPY --from=mcp-installer /opt/mcp /opt/mcp
 RUN ln -sf /opt/mcp/bin/playwright-mcp /usr/bin/playwright-mcp \
     && playwright-mcp --help > /dev/null
 
-COPY --from=builder /app/vigil /usr/local/bin/vigil
+COPY --from=binary /vigil /usr/local/bin/vigil
 
 ENTRYPOINT ["vigil"]
