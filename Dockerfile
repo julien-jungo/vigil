@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# Requires BuildKit. Pass --build-arg PREBUILT=1 when the binary is pre-built (e.g. by GoReleaser).
 
 ARG PREBUILT=0
 
@@ -22,12 +23,13 @@ FROM scratch AS binary-0
 COPY --from=builder /app/vigil /vigil
 
 FROM scratch AS binary-1
-COPY vigil /vigil
+COPY vigil /vigil  # binary injected into build context by GoReleaser
 
 FROM binary-${PREBUILT} AS binary
 
 # ── MCP install stage ─────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/playwright:v1.51.0-noble AS mcp-installer
+
 # renovate: datasource=npm depName=@playwright/mcp
 RUN npm install -g @playwright/mcp@0.0.71 --prefix /opt/mcp
 
