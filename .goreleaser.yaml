@@ -58,8 +58,8 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--cache-from=type=gha"
-      - "--cache-to=type=gha,mode=max"
+      - "--cache-from=type=gha,scope=docker-vigil-amd64"
+      - "--cache-to=type=gha,mode=max,scope=docker-vigil-amd64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.source=https://github.com/julien-jungo/vigil"
@@ -75,8 +75,8 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/arm64"
-      - "--cache-from=type=gha"
-      - "--cache-to=type=gha,mode=max"
+      - "--cache-from=type=gha,scope=docker-vigil-arm64"
+      - "--cache-to=type=gha,mode=max,scope=docker-vigil-arm64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.source=https://github.com/julien-jungo/vigil"
