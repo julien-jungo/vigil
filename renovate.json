@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 6am on Monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "Go module and toolchain patch updates"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "GitHub Actions patch updates"
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "Docker image patch updates"
+    }
+  ]
+}

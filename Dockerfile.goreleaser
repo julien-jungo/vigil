@@ -2,6 +2,7 @@
 # Runtime image used by GoReleaser (binary is pre-built and injected by GoReleaser).
 
 FROM mcr.microsoft.com/playwright:v1.51.0-noble AS mcp-installer
+# renovate: datasource=npm depName=@playwright/mcp
 RUN npm install -g @playwright/mcp@0.0.71 --prefix /opt/mcp
 
 FROM mcr.microsoft.com/playwright:v1.51.0-noble

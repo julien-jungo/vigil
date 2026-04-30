@@ -17,6 +17,7 @@ RUN make build VERSION=${VERSION}
 
 # ── MCP install stage ─────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/playwright:v1.51.0-noble AS mcp-installer
+# renovate: datasource=npm depName=@playwright/mcp
 RUN npm install -g @playwright/mcp@0.0.71 --prefix /opt/mcp
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
