@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -147,6 +148,26 @@ func TestCall_toolError(t *testing.T) {
 	_, err := client.Call(context.Background(), "browser_click", map[string]any{"selector": "#missing"})
 	if err == nil {
 		t.Fatal("expected error for isError=true")
+	}
+	if !strings.Contains(err.Error(), "element not found") {
+		t.Errorf("expected text content in error, got %v", err)
+	}
+}
+
+func TestCall_toolError_nonTextContent(t *testing.T) {
+	id := int64(2)
+	client, _ := newTestClient(t, &Message{
+		JSONRPC: jsonRPCVersion,
+		ID:      &id,
+		Result:  json.RawMessage(`{"content":[{"type":"image","data":"abc=","mimeType":"image/png"}],"isError":true}`),
+	})
+
+	_, err := client.Call(context.Background(), "browser_screenshot", nil)
+	if err == nil {
+		t.Fatal("expected error for isError=true")
+	}
+	if !strings.Contains(err.Error(), "browser_screenshot error") {
+		t.Errorf("expected generic fallback error, got %v", err)
 	}
 }
 

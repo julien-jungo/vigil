@@ -70,8 +70,11 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*C
 	}
 	if result.IsError {
 		msg := name + " error"
-		if len(result.Content) > 0 {
-			msg = result.Content[0].Text
+		for _, c := range result.Content {
+			if c.Type == "text" && c.Text != "" {
+				msg = c.Text
+				break
+			}
 		}
 		return &result, fmt.Errorf("tool %s: %s", name, msg)
 	}

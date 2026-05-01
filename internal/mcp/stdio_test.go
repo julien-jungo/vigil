@@ -62,7 +62,10 @@ func TestStdioTransport_Receive(t *testing.T) {
 
 	id := int64(42)
 	msg := &Message{JSONRPC: jsonRPCVersion, ID: &id, Result: json.RawMessage(`{"ok":true}`)}
-	data, _ := json.Marshal(msg)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
 
 	go func() {
 		_, _ = stdoutW.Write(append(data, '\n'))

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 var ErrTransportClosed = errors.New("mcp: transport closed")
@@ -17,6 +18,7 @@ var ErrTransportClosed = errors.New("mcp: transport closed")
 const (
 	scannerInitBufSize = 64 * 1024
 	maxMessageSize     = 10 * 1024 * 1024 // 10 MB — screenshots can be large
+	gracePeriod        = 5 * time.Second
 )
 
 type msgResult struct {
@@ -41,7 +43,7 @@ func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, std
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
 
-	msgs := make(chan msgResult, 1)
+	msgs := make(chan msgResult, 64)
 	done := make(chan struct{})
 	go func() {
 		defer close(msgs)
@@ -72,9 +74,24 @@ func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, std
 	}()
 
 	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			slog.Debug("playwright-mcp", "msg", scanner.Text())
+		lines := make(chan string, 1)
+		go func() {
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				lines <- scanner.Text()
+			}
+			close(lines)
+		}()
+		for {
+			select {
+			case <-done:
+				return
+			case line, ok := <-lines:
+				if !ok {
+					return
+				}
+				slog.Debug("playwright-mcp", "msg", line)
+			}
 		}
 	}()
 
@@ -122,10 +139,13 @@ func (t *StdioTransport) shutdown() {
 		if t.stderr != nil {
 			_ = t.stderr.Close()
 		}
-		if t.cmd != nil && t.cmd.Process != nil {
-			_ = t.cmd.Process.Kill()
-		}
 	})
+}
+
+func (t *StdioTransport) kill() {
+	if t.cmd != nil && t.cmd.Process != nil {
+		_ = t.cmd.Process.Kill()
+	}
 }
 
 func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
@@ -160,7 +180,8 @@ func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
 
 	select {
 	case <-ctx.Done():
-		t.shutdown() // treat cancellation as full transport shutdown
+		t.shutdown()
+		t.kill()
 		return ctx.Err()
 	case <-t.done:
 		return ErrTransportClosed
@@ -178,7 +199,8 @@ func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
 
 	select {
 	case <-ctx.Done():
-		t.shutdown() // treat cancellation as full transport shutdown
+		t.shutdown()
+		t.kill()
 		return nil, ctx.Err()
 	case <-t.done:
 		return nil, ErrTransportClosed
@@ -192,10 +214,21 @@ func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
 
 func (t *StdioTransport) Close() error {
 	t.shutdown()
-	if t.cmd != nil {
-		t.waitOnce.Do(func() {
-			t.waitErr = t.cmd.Wait()
-		})
+	if t.cmd == nil {
+		return nil
 	}
+	t.waitOnce.Do(func() {
+		exited := make(chan struct{})
+		go func() {
+			t.waitErr = t.cmd.Wait()
+			close(exited)
+		}()
+		select {
+		case <-exited:
+		case <-time.After(gracePeriod):
+			t.kill()
+			<-exited
+		}
+	})
 	return t.waitErr
 }
