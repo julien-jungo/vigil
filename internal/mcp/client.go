@@ -17,7 +17,9 @@ type Client struct {
 	tools     []Tool
 	version   string
 	nextID    int64
+	closed    bool
 	mu        sync.Mutex
+	tmu       sync.Mutex
 }
 
 // version is the caller's build version and is reported to the server during initialisation.
@@ -77,6 +79,12 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*C
 func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil
+	}
+	c.closed = true
+
 	return c.transport.Close()
 }
 
@@ -112,10 +120,16 @@ func (c *Client) listTools(ctx context.Context) error {
 
 func (c *Client) request(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	if c.closed {
+		c.mu.Unlock()
+		return nil, ErrTransportClosed
+	}
 	id := c.nextID
 	c.nextID++
+	c.mu.Unlock()
+
+	c.tmu.Lock()
+	defer c.tmu.Unlock()
 
 	if err := c.transport.Send(ctx, &Message{
 		JSONRPC: jsonRPCVersion,
@@ -146,7 +160,15 @@ func (c *Client) request(ctx context.Context, method string, params json.RawMess
 
 func (c *Client) notify(ctx context.Context, method string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	if c.closed {
+		c.mu.Unlock()
+		return ErrTransportClosed
+	}
+	c.mu.Unlock()
+
+	c.tmu.Lock()
+	defer c.tmu.Unlock()
+
 	return c.transport.Send(ctx, &Message{
 		JSONRPC: jsonRPCVersion,
 		Method:  method,

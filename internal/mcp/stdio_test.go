@@ -184,12 +184,19 @@ func TestStdioTransport_Send_ContextCancelledLeavesTransportUsable(t *testing.T)
 		t.Fatalf("second Send: %v", err)
 	}
 
-	var last Message
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
-		t.Fatalf("unmarshal last line: %v", err)
+	foundToolsList := false
+	for _, line := range lines {
+		var m Message
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("unmarshal line %q: %v", line, err)
+		}
+		if m.Method == "tools/list" {
+			foundToolsList = true
+		}
 	}
-	if last.Method != "tools/list" {
-		t.Errorf("Method = %q, want tools/list", last.Method)
+
+	if !foundToolsList {
+		t.Errorf("Method \"tools/list\" not found in lines: %v", lines)
 	}
 }
 

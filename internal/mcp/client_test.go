@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockTransport struct {
@@ -207,5 +208,63 @@ func TestClose(t *testing.T) {
 	client, _ := newTestClient(t)
 	if err := client.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+type blockingReceiveTransport struct {
+	mockTransport
+	receiveBlocked chan struct{}
+}
+
+func (t *blockingReceiveTransport) Receive(ctx context.Context) (*Message, error) {
+	if t.idx < len(t.recv) {
+		msg := t.recv[t.idx]
+		t.idx++
+		return msg, nil
+	}
+
+	select {
+	case t.receiveBlocked <- struct{}{}:
+		<-ctx.Done()
+	case <-ctx.Done():
+	}
+
+	return nil, ctx.Err()
+}
+
+func TestClient_CloseDeadlock(t *testing.T) {
+	receiveBlocked := make(chan struct{}, 1)
+	transport := &blockingReceiveTransport{
+		mockTransport: mockTransport{recv: initResponses()},
+		receiveBlocked: receiveBlocked,
+	}
+
+	client, err := New(context.Background(), transport, "test")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	callDone := make(chan struct{})
+	go func() {
+		_, _ = client.Call(context.Background(), "browser_navigate", map[string]any{"url": "http://example.com"})
+		close(callDone)
+	}()
+
+	select {
+	case <-receiveBlocked:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for Receive to be called")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		_ = client.Close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		t.Error("Close() blocked for too long")
 	}
 }

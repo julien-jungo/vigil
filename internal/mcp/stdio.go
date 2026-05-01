@@ -30,8 +30,9 @@ type StdioTransport struct {
 	stderr    io.ReadCloser
 	msgs      <-chan msgResult
 	done      chan struct{}
-	closeOnce sync.Once
 	exited    chan struct{} // closed when cmd.Wait returns
+	closeOnce sync.Once
+	writeMu   sync.Mutex
 	waitErr   error
 }
 
@@ -156,6 +157,9 @@ func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
 
 	errCh := make(chan error, 1)
 	go func() {
+		t.writeMu.Lock()
+		defer t.writeMu.Unlock()
+
 		for written := 0; written < len(data); {
 			n, err := t.stdin.Write(data[written:])
 			if err != nil {
