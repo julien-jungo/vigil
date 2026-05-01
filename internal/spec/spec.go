@@ -73,7 +73,10 @@ func parse(src []byte) (Spec, error) {
 	ctx := parser.NewContext()
 	doc := md.Parser().Parse(text.NewReader(src), parser.WithContext(ctx))
 
-	rawMeta := meta.Get(ctx)
+	rawMeta, err := meta.TryGet(ctx)
+	if err != nil {
+		return Spec{}, fmt.Errorf("parse frontmatter: %w", err)
+	}
 
 	var spec Spec
 	spec.URL, _ = rawMeta["url"].(string)
@@ -97,6 +100,7 @@ func parse(src []byte) (Spec, error) {
 		case *gast.ListItem:
 			if list, ok := node.Parent().(*gast.List); ok && list.IsOrdered() {
 				spec.Steps = append(spec.Steps, nodeText(node, src))
+				return gast.WalkSkipChildren, nil
 			}
 		}
 		return gast.WalkContinue, nil
@@ -110,6 +114,9 @@ func nodeText(n gast.Node, src []byte) string {
 	_ = gast.Walk(n, func(child gast.Node, entering bool) (gast.WalkStatus, error) {
 		if !entering {
 			return gast.WalkContinue, nil
+		}
+		if _, ok := child.(*gast.List); ok && child != n {
+			return gast.WalkSkipChildren, nil
 		}
 		if t, ok := child.(*gast.Text); ok {
 			sb.Write(t.Value(src))

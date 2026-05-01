@@ -50,6 +50,21 @@ Just some prose.
 1. First line
    continued here
 `[1:]
+
+	invalidFrontmatter = `
+---
+key: [unclosed
+---
+
+# Title
+`[1:]
+
+	nestedList = `
+1. Step one
+   1. Sub-step A
+   2. Sub-step B
+2. Step two
+`[1:]
 )
 
 func TestParse_withFrontmatter(t *testing.T) {
@@ -103,6 +118,29 @@ func TestParse_emptyFrontmatter(t *testing.T) {
 	}
 	if len(s.Steps) != 1 {
 		t.Errorf("Steps count = %d, want 1", len(s.Steps))
+	}
+}
+
+func TestParse_invalidFrontmatter(t *testing.T) {
+	_, err := parse([]byte(invalidFrontmatter))
+	if err == nil {
+		t.Fatal("expected error for invalid frontmatter")
+	}
+}
+
+func TestParse_nestedList(t *testing.T) {
+	s, err := parse([]byte(nestedList))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(s.Steps) != 2 {
+		t.Fatalf("Steps count = %d, want 2 (nested items must not be collected separately)", len(s.Steps))
+	}
+	if s.Steps[0] != "Step one" {
+		t.Errorf("Steps[0] = %q, want %q", s.Steps[0], "Step one")
+	}
+	if s.Steps[1] != "Step two" {
+		t.Errorf("Steps[1] = %q, want %q", s.Steps[1], "Step two")
 	}
 }
 
