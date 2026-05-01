@@ -19,6 +19,7 @@ const (
 type StdioTransport struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
+	stdout  io.ReadCloser
 	scanner *bufio.Scanner
 }
 
@@ -58,10 +59,14 @@ func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioT
 		}
 	}()
 
-	return &StdioTransport{cmd: cmd, stdin: stdin, scanner: scanner}, nil
+	return &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, scanner: scanner}, nil
 }
 
-func (t *StdioTransport) Send(_ context.Context, msg *Message) error {
+func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
@@ -81,18 +86,30 @@ func (t *StdioTransport) Send(_ context.Context, msg *Message) error {
 	return nil
 }
 
-func (t *StdioTransport) Receive(_ context.Context) (*Message, error) {
-	if !t.scanner.Scan() {
-		if err := t.scanner.Err(); err != nil {
-			return nil, err
+func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
+	ch := make(chan bool, 1)
+	go func() {
+		ch <- t.scanner.Scan()
+	}()
+
+	select {
+	case <-ctx.Done():
+		_ = t.stdout.Close()
+		return nil, ctx.Err()
+	case more := <-ch:
+		if !more {
+			if err := t.scanner.Err(); err != nil {
+				return nil, err
+			}
+			return nil, io.EOF
 		}
-		return nil, io.EOF
+
+		var msg Message
+		if err := json.Unmarshal(t.scanner.Bytes(), &msg); err != nil {
+			return nil, fmt.Errorf("unmarshal message: %w", err)
+		}
+		return &msg, nil
 	}
-	var msg Message
-	if err := json.Unmarshal(t.scanner.Bytes(), &msg); err != nil {
-		return nil, fmt.Errorf("unmarshal message: %w", err)
-	}
-	return &msg, nil
 }
 
 func (t *StdioTransport) Close() error {

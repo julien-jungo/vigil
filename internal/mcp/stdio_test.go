@@ -19,6 +19,7 @@ func newPipedTransport(t *testing.T) (*StdioTransport, io.Reader, *io.PipeWriter
 
 	transport := &StdioTransport{
 		stdin:   stdinW,
+		stdout:  stdoutR,
 		scanner: scanner,
 	}
 
@@ -102,6 +103,31 @@ func TestStdioTransport_Receive_InvalidJSON(t *testing.T) {
 	_, err := transport.Receive(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "unmarshal") {
 		t.Errorf("expected unmarshal error, got %v", err)
+	}
+}
+
+func TestStdioTransport_Receive_ContextCancelled(t *testing.T) {
+	transport, _, _ := newPipedTransport(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := transport.Receive(ctx)
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestStdioTransport_Send_ContextCancelled(t *testing.T) {
+	transport, _, _ := newPipedTransport(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	id := int64(1)
+	err := transport.Send(ctx, &Message{JSONRPC: jsonRPCVersion, ID: &id, Method: "tools/list"})
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 
