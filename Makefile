@@ -18,7 +18,9 @@ fmt:
 	gofmt -l -w .
 	goimports -l -w .
 
+DOCKER_CACHE_FLAGS ?=
+
 test-container:
-	docker buildx build --load -t vigil:test .
+	docker buildx build $(DOCKER_CACHE_FLAGS) --load -t vigil:test .
 	docker run --rm vigil:test --version
-	docker run --rm --entrypoint playwright-mcp vigil:test --help
+	docker run --rm --entrypoint playwright-mcp vigil:test --help > /dev/null
