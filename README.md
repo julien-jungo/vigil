@@ -148,6 +148,9 @@ vigil/
 ## Build & Run
 
 ```sh
+# First-time setup (activates pre-push hook)
+git config core.hooksPath .githooks
+
 # Build
 go build -o vigil ./cmd/vigil
 
