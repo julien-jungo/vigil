@@ -53,13 +53,4 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Build image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          tags: vigil:test
-      - name: Verify vigil binary
-        run: docker run --rm vigil:test --version
-      - name: Verify playwright-mcp installation
-        run: docker run --rm --entrypoint playwright-mcp vigil:test --help
+      - run: make test-container

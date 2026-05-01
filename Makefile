@@ -3,7 +3,7 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 BINARY  := vigil
 CMD     := ./cmd/vigil
 
-.PHONY: build test lint fmt
+.PHONY: build test lint fmt test-container
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) $(CMD)
@@ -17,3 +17,8 @@ lint:
 fmt:
 	gofmt -l -w .
 	goimports -l -w .
+
+test-container:
+	docker buildx build --load -t vigil:test .
+	docker run --rm vigil:test --version
+	docker run --rm --entrypoint playwright-mcp vigil:test --help
