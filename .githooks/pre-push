@@ -1,3 +1,15 @@
 #!/bin/sh
 set -e
+
+check() {
+  if ! command -v "$1" > /dev/null 2>&1; then
+    echo "error: $1 is not installed — $2"
+    exit 1
+  fi
+}
+
+check gofmt         "install Go from https://go.dev/dl"
+check goimports     "run: go install golang.org/x/tools/cmd/goimports@latest"
+check golangci-lint "run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+
 make fmt lint test build
