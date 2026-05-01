@@ -4,14 +4,18 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
+	"sync"
 )
 
+var ErrTransportClosed = errors.New("mcp: transport closed")
+
 const (
-	scannerInitBufSize = 64 * 1024        // 64 KB
+	scannerInitBufSize = 64 * 1024
 	maxMessageSize     = 10 * 1024 * 1024 // 10 MB — screenshots can be large
 )
 
@@ -22,14 +26,18 @@ type msgResult struct {
 
 // It is not safe for concurrent use; synchronisation is the caller's responsibility.
 type StdioTransport struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	msgs   <-chan msgResult
-	done   chan struct{}
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdout    io.ReadCloser
+	stderr    io.ReadCloser
+	msgs      <-chan msgResult
+	done      chan struct{}
+	closeOnce sync.Once
+	waitOnce  sync.Once
+	waitErr   error
 }
 
-func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.Reader) *StdioTransport {
+func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser) *StdioTransport {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
 
@@ -70,7 +78,7 @@ func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, std
 		}
 	}()
 
-	return &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, msgs: msgs, done: done}
+	return &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, msgs: msgs, done: done}
 }
 
 func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioTransport, error) {
@@ -102,7 +110,31 @@ func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioT
 	return newTransport(cmd, stdin, stdout, stderr), nil
 }
 
+func (t *StdioTransport) shutdown() {
+	t.closeOnce.Do(func() {
+		close(t.done)
+		if t.stdin != nil {
+			_ = t.stdin.Close()
+		}
+		if t.stdout != nil {
+			_ = t.stdout.Close()
+		}
+		if t.stderr != nil {
+			_ = t.stderr.Close()
+		}
+		if t.cmd != nil && t.cmd.Process != nil {
+			_ = t.cmd.Process.Kill()
+		}
+	})
+}
+
 func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
+	select {
+	case <-t.done:
+		return ErrTransportClosed
+	default:
+	}
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
@@ -128,8 +160,10 @@ func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
 
 	select {
 	case <-ctx.Done():
-		_ = t.stdin.Close() // unblock the write goroutine
+		t.shutdown() // treat cancellation as full transport shutdown
 		return ctx.Err()
+	case <-t.done:
+		return ErrTransportClosed
 	case err := <-errCh:
 		return err
 	}
@@ -137,8 +171,17 @@ func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
 
 func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
 	select {
+	case <-t.done:
+		return nil, ErrTransportClosed
+	default:
+	}
+
+	select {
 	case <-ctx.Done():
+		t.shutdown() // treat cancellation as full transport shutdown
 		return nil, ctx.Err()
+	case <-t.done:
+		return nil, ErrTransportClosed
 	case res, ok := <-t.msgs:
 		if !ok {
 			return nil, io.EOF
@@ -148,17 +191,11 @@ func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
 }
 
 func (t *StdioTransport) Close() error {
-	if t.done != nil {
-		close(t.done)
+	t.shutdown()
+	if t.cmd != nil {
+		t.waitOnce.Do(func() {
+			t.waitErr = t.cmd.Wait()
+		})
 	}
-	if t.stdin != nil {
-		_ = t.stdin.Close()
-	}
-	if t.stdout != nil {
-		_ = t.stdout.Close()
-	}
-	if t.cmd == nil {
-		return nil
-	}
-	return t.cmd.Wait()
+	return t.waitErr
 }

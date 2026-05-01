@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ func newPipedTransport(t *testing.T) (*StdioTransport, io.Reader, *io.PipeWriter
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 
-	transport := newTransport(nil, stdinW, stdoutR, strings.NewReader(""))
+	transport := newTransport(nil, stdinW, stdoutR, io.NopCloser(strings.NewReader("")))
 
 	t.Cleanup(func() {
 		_ = stdinR.Close()
@@ -147,5 +148,26 @@ func TestStdioTransport_Close_NilCmd(t *testing.T) {
 	transport, _, _ := newPipedTransport(t)
 	if err := transport.Close(); err != nil {
 		t.Errorf("Close: %v", err)
+	}
+}
+
+func TestStdioTransport_Send_AfterClose(t *testing.T) {
+	transport, _, _ := newPipedTransport(t)
+	_ = transport.Close()
+
+	id := int64(1)
+	err := transport.Send(context.Background(), &Message{JSONRPC: jsonRPCVersion, ID: &id, Method: "ping"})
+	if !errors.Is(err, ErrTransportClosed) {
+		t.Errorf("err = %v, want ErrTransportClosed", err)
+	}
+}
+
+func TestStdioTransport_Receive_AfterClose(t *testing.T) {
+	transport, _, _ := newPipedTransport(t)
+	_ = transport.Close()
+
+	_, err := transport.Receive(context.Background())
+	if !errors.Is(err, ErrTransportClosed) {
+		t.Errorf("err = %v, want ErrTransportClosed", err)
 	}
 }

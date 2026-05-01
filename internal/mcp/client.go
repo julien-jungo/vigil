@@ -24,9 +24,11 @@ type Client struct {
 func New(ctx context.Context, transport Transport, version string) (*Client, error) {
 	client := &Client{transport: transport, version: version}
 	if err := client.initialize(ctx); err != nil {
+		_ = transport.Close()
 		return nil, fmt.Errorf("mcp initialize: %w", err)
 	}
 	if err := client.listTools(ctx); err != nil {
+		_ = transport.Close()
 		return nil, fmt.Errorf("mcp list tools: %w", err)
 	}
 	return client, nil
@@ -35,7 +37,14 @@ func New(ctx context.Context, transport Transport, version string) (*Client, err
 func (c *Client) Tools() []Tool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]Tool(nil), c.tools...)
+
+	tools := make([]Tool, len(c.tools))
+	for i, tool := range c.tools {
+		tools[i] = tool
+		tools[i].InputSchema = append(json.RawMessage(nil), tool.InputSchema...)
+	}
+
+	return tools
 }
 
 func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*CallResult, error) {
@@ -126,8 +135,11 @@ func (c *Client) request(ctx context.Context, method string, params json.RawMess
 		if err != nil {
 			return nil, fmt.Errorf("receive %s: %w", method, err)
 		}
-		if msg.ID == nil || *msg.ID != id {
-			continue // skip notifications and mismatched responses
+		if msg.ID == nil {
+			continue // notification, skip
+		}
+		if *msg.ID != id {
+			return nil, fmt.Errorf("receive %s: unexpected response id %d (want %d)", method, *msg.ID, id)
 		}
 		if msg.Error != nil {
 			return nil, msg.Error
