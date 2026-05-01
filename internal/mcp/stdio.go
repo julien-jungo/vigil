@@ -74,24 +74,9 @@ func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, std
 	}()
 
 	go func() {
-		lines := make(chan string, 1)
-		go func() {
-			scanner := bufio.NewScanner(stderr)
-			for scanner.Scan() {
-				lines <- scanner.Text()
-			}
-			close(lines)
-		}()
-		for {
-			select {
-			case <-done:
-				return
-			case line, ok := <-lines:
-				if !ok {
-					return
-				}
-				slog.Debug("playwright-mcp", "msg", line)
-			}
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			slog.Debug("playwright-mcp", "msg", scanner.Text())
 		}
 	}()
 

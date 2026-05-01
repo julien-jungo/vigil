@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -145,12 +146,19 @@ func TestCall_toolError(t *testing.T) {
 		Result:  json.RawMessage(`{"content":[{"type":"text","text":"element not found"}],"isError":true}`),
 	})
 
-	_, err := client.Call(context.Background(), "browser_click", map[string]any{"selector": "#missing"})
-	if err == nil {
-		t.Fatal("expected error for isError=true")
+	result, err := client.Call(context.Background(), "browser_click", map[string]any{"selector": "#missing"})
+	if result != nil {
+		t.Error("expected nil result for isError=true")
 	}
-	if !strings.Contains(err.Error(), "element not found") {
-		t.Errorf("expected text content in error, got %v", err)
+	var toolErr *ToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("expected *ToolError, got %T: %v", err, err)
+	}
+	if toolErr.Tool != "browser_click" {
+		t.Errorf("Tool = %q, want browser_click", toolErr.Tool)
+	}
+	if !strings.Contains(toolErr.Error(), "element not found") {
+		t.Errorf("expected text content in error, got %v", toolErr)
 	}
 }
 
@@ -162,12 +170,16 @@ func TestCall_toolError_nonTextContent(t *testing.T) {
 		Result:  json.RawMessage(`{"content":[{"type":"image","data":"abc=","mimeType":"image/png"}],"isError":true}`),
 	})
 
-	_, err := client.Call(context.Background(), "browser_screenshot", nil)
-	if err == nil {
-		t.Fatal("expected error for isError=true")
+	result, err := client.Call(context.Background(), "browser_screenshot", nil)
+	if result != nil {
+		t.Error("expected nil result for isError=true")
 	}
-	if !strings.Contains(err.Error(), "browser_screenshot error") {
-		t.Errorf("expected generic fallback error, got %v", err)
+	var toolErr *ToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("expected *ToolError, got %T: %v", err, err)
+	}
+	if !strings.Contains(toolErr.Error(), "browser_screenshot") {
+		t.Errorf("expected tool name in fallback error, got %v", toolErr)
 	}
 }
 

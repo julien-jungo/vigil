@@ -43,6 +43,20 @@ type CallResult struct {
 	IsError bool          `json:"isError"`
 }
 
+type ToolError struct {
+	Tool    string
+	Content []ContentItem
+}
+
+func (e *ToolError) Error() string {
+	for _, c := range e.Content {
+		if c.Type == "text" && c.Text != "" {
+			return fmt.Sprintf("tool %s: %s", e.Tool, c.Text)
+		}
+	}
+	return fmt.Sprintf("tool %s: error", e.Tool)
+}
+
 type ContentItem struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`

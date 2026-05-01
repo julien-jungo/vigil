@@ -69,14 +69,7 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*C
 		return nil, fmt.Errorf("unmarshal call result: %w", err)
 	}
 	if result.IsError {
-		msg := name + " error"
-		for _, c := range result.Content {
-			if c.Type == "text" && c.Text != "" {
-				msg = c.Text
-				break
-			}
-		}
-		return &result, fmt.Errorf("tool %s: %s", name, msg)
+		return nil, &ToolError{Tool: name, Content: result.Content}
 	}
 	return &result, nil
 }
