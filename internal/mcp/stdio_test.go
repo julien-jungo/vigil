@@ -115,6 +115,35 @@ func TestStdioTransport_Receive_ContextCancelled(t *testing.T) {
 	}
 }
 
+func TestStdioTransport_Receive_ContextCancelledLeavesTransportUsable(t *testing.T) {
+	transport, _, stdoutW := newPipedTransport(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := transport.Receive(ctx); err != context.Canceled {
+		t.Fatalf("first Receive: err = %v, want context.Canceled", err)
+	}
+
+	id := int64(1)
+	msg := &Message{JSONRPC: jsonRPCVersion, ID: &id, Result: json.RawMessage(`{"ok":true}`)}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	go func() {
+		_, _ = stdoutW.Write(append(data, '\n'))
+	}()
+
+	got, err := transport.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("second Receive: %v", err)
+	}
+	if got.ID == nil || *got.ID != 1 {
+		t.Errorf("ID = %v, want 1", got.ID)
+	}
+}
+
 func TestStdioTransport_Send_ContextCancelled(t *testing.T) {
 	transport, _, _ := newPipedTransport(t)
 
@@ -125,6 +154,42 @@ func TestStdioTransport_Send_ContextCancelled(t *testing.T) {
 	err := transport.Send(ctx, &Message{JSONRPC: jsonRPCVersion, ID: &id, Method: "tools/list"})
 	if err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestStdioTransport_Send_ContextCancelledLeavesTransportUsable(t *testing.T) {
+	transport, stdinR, _ := newPipedTransport(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	id := int64(1)
+	if err := transport.Send(ctx, &Message{JSONRPC: jsonRPCVersion, ID: &id, Method: "ping"}); err != context.Canceled {
+		t.Fatalf("first Send: err = %v, want context.Canceled", err)
+	}
+
+	id2 := int64(2)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- transport.Send(context.Background(), &Message{JSONRPC: jsonRPCVersion, ID: &id2, Method: "tools/list"})
+	}()
+
+	scanner := bufio.NewScanner(stdinR)
+	var lines []string
+	for len(lines) < 2 && scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("second Send: %v", err)
+	}
+
+	var last Message
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatalf("unmarshal last line: %v", err)
+	}
+	if last.Method != "tools/list" {
+		t.Errorf("Method = %q, want tools/list", last.Method)
 	}
 }
 
@@ -162,6 +227,35 @@ func TestStdioTransport_Send_AfterClose(t *testing.T) {
 	err := transport.Send(context.Background(), &Message{JSONRPC: jsonRPCVersion, ID: &id, Method: "ping"})
 	if !errors.Is(err, ErrTransportClosed) {
 		t.Errorf("err = %v, want ErrTransportClosed", err)
+	}
+}
+
+func TestStdioTransport_Receive_LargeMessage(t *testing.T) {
+	transport, _, stdoutW := newPipedTransport(t)
+
+	// Construct a message whose JSON representation exceeds the old 10 MB scanner limit.
+	const payloadSize = 11 * 1024 * 1024
+	id := int64(7)
+	msg := &Message{
+		JSONRPC: jsonRPCVersion,
+		ID:      &id,
+		Result:  json.RawMessage(`"` + strings.Repeat("a", payloadSize) + `"`),
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	go func() {
+		_, _ = stdoutW.Write(append(data, '\n'))
+	}()
+
+	got, err := transport.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if got.ID == nil || *got.ID != 7 {
+		t.Errorf("ID = %v, want 7", got.ID)
 	}
 }
 

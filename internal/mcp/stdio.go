@@ -15,11 +15,7 @@ import (
 
 var ErrTransportClosed = errors.New("mcp: transport closed")
 
-const (
-	scannerInitBufSize = 64 * 1024
-	maxMessageSize     = 10 * 1024 * 1024 // 10 MB — screenshots can be large
-	gracePeriod        = 5 * time.Second
-)
+const gracePeriod = 5 * time.Second
 
 type msgResult struct {
 	msg *Message
@@ -35,39 +31,41 @@ type StdioTransport struct {
 	msgs      <-chan msgResult
 	done      chan struct{}
 	closeOnce sync.Once
-	waitOnce  sync.Once
+	exited    chan struct{} // closed when cmd.Wait returns
 	waitErr   error
 }
 
 func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser) *StdioTransport {
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
+	reader := bufio.NewReader(stdout)
 
 	msgs := make(chan msgResult, 64)
 	done := make(chan struct{})
 	go func() {
 		defer close(msgs)
 		for {
-			if !scanner.Scan() {
-				if err := scanner.Err(); err != nil {
+			line, err := reader.ReadBytes('\n')
+			if len(line) > 0 {
+				var msg Message
+				if jsonErr := json.Unmarshal(line, &msg); jsonErr != nil {
+					select {
+					case msgs <- msgResult{err: fmt.Errorf("unmarshal message: %w", jsonErr)}:
+					case <-done:
+					}
+					return
+				}
+				select {
+				case msgs <- msgResult{msg: &msg}:
+				case <-done:
+					return
+				}
+			}
+			if err != nil {
+				if err != io.EOF {
 					select {
 					case msgs <- msgResult{err: err}:
 					case <-done:
 					}
 				}
-				return
-			}
-			var msg Message
-			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-				select {
-				case msgs <- msgResult{err: fmt.Errorf("unmarshal message: %w", err)}:
-				case <-done:
-				}
-				return
-			}
-			select {
-			case msgs <- msgResult{msg: &msg}:
-			case <-done:
 				return
 			}
 		}
@@ -80,7 +78,17 @@ func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, std
 		}
 	}()
 
-	return &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, msgs: msgs, done: done}
+	exited := make(chan struct{})
+	t := &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, msgs: msgs, done: done, exited: exited}
+	if cmd != nil {
+		go func() {
+			t.waitErr = cmd.Wait()
+			close(exited)
+		}()
+	} else {
+		close(exited)
+	}
+	return t
 }
 
 func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioTransport, error) {
@@ -165,8 +173,6 @@ func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
 
 	select {
 	case <-ctx.Done():
-		t.shutdown()
-		t.kill()
 		return ctx.Err()
 	case <-t.done:
 		return ErrTransportClosed
@@ -184,8 +190,6 @@ func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
 
 	select {
 	case <-ctx.Done():
-		t.shutdown()
-		t.kill()
 		return nil, ctx.Err()
 	case <-t.done:
 		return nil, ErrTransportClosed
@@ -202,18 +206,11 @@ func (t *StdioTransport) Close() error {
 	if t.cmd == nil {
 		return nil
 	}
-	t.waitOnce.Do(func() {
-		exited := make(chan struct{})
-		go func() {
-			t.waitErr = t.cmd.Wait()
-			close(exited)
-		}()
-		select {
-		case <-exited:
-		case <-time.After(gracePeriod):
-			t.kill()
-			<-exited
-		}
-	})
+	select {
+	case <-t.exited:
+	case <-time.After(gracePeriod):
+		t.kill()
+		<-t.exited
+	}
 	return t.waitErr
 }
