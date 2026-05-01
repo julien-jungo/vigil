@@ -235,7 +235,9 @@ func (t *blockingReceiveTransport) Receive(ctx context.Context) (*Message, error
 func TestClient_CloseDeadlock(t *testing.T) {
 	receiveBlocked := make(chan struct{}, 1)
 	transport := &blockingReceiveTransport{
-		mockTransport: mockTransport{recv: initResponses()},
+		mockTransport: mockTransport{
+			recv: initResponses(),
+		},
 		receiveBlocked: receiveBlocked,
 	}
 
