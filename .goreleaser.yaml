@@ -58,7 +58,7 @@ dockers:
     dockerfile: Dockerfile
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--build-arg=PREBUILT=1"
+      - "--target=goreleaser"
       - "--cache-from=type=gha,scope=docker-vigil-amd64"
       - "--cache-to=type=gha,mode=max,scope=docker-vigil-amd64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
@@ -76,7 +76,7 @@ dockers:
     dockerfile: Dockerfile
     build_flag_templates:
       - "--platform=linux/arm64"
-      - "--build-arg=PREBUILT=1"
+      - "--target=goreleaser"
       - "--cache-from=type=gha,scope=docker-vigil-arm64"
       - "--cache-to=type=gha,mode=max,scope=docker-vigil-arm64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
