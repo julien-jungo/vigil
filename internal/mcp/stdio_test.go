@@ -15,7 +15,7 @@ func newPipedTransport(t *testing.T) (*StdioTransport, io.Reader, *io.PipeWriter
 	stdoutR, stdoutW := io.Pipe()
 
 	scanner := bufio.NewScanner(stdoutR)
-	scanner.Buffer(make([]byte, maxMessageSize), maxMessageSize)
+	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
 
 	transport := &StdioTransport{
 		stdin:   stdinW,

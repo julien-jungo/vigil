@@ -10,7 +10,10 @@ import (
 	"os/exec"
 )
 
-const maxMessageSize = 10 * 1024 * 1024 // 10 MB — screenshots can be large
+const (
+	scannerInitBufSize = 64 * 1024        // 64 KB
+	maxMessageSize     = 10 * 1024 * 1024 // 10 MB — screenshots can be large
+)
 
 // It is not safe for concurrent use; synchronisation is the caller's responsibility.
 type StdioTransport struct {
@@ -28,19 +31,25 @@ func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioT
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
 		return nil, fmt.Errorf("start %s: %w", bin, err)
 	}
 
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, maxMessageSize), maxMessageSize)
+	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
 
 	go func() {
 		scanner := bufio.NewScanner(stderr)
@@ -59,8 +68,17 @@ func (t *StdioTransport) Send(_ context.Context, msg *Message) error {
 	}
 	data = append(data, '\n')
 
-	_, err = t.stdin.Write(data)
-	return err
+	for written := 0; written < len(data); {
+		n, err := t.stdin.Write(data[written:])
+		if err != nil {
+			return fmt.Errorf("write stdin: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("write stdin: %w", io.ErrShortWrite)
+		}
+		written += n
+	}
+	return nil
 }
 
 func (t *StdioTransport) Receive(_ context.Context) (*Message, error) {

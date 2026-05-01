@@ -33,7 +33,9 @@ func New(ctx context.Context, transport Transport, version string) (*Client, err
 }
 
 func (c *Client) Tools() []Tool {
-	return c.tools
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]Tool(nil), c.tools...)
 }
 
 func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*CallResult, error) {
@@ -55,12 +57,18 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*C
 		return nil, fmt.Errorf("unmarshal call result: %w", err)
 	}
 	if result.IsError {
-		return &result, fmt.Errorf("tool %s returned error", name)
+		msg := name + " error"
+		if len(result.Content) > 0 {
+			msg = result.Content[0].Text
+		}
+		return &result, fmt.Errorf("tool %s: %s", name, msg)
 	}
 	return &result, nil
 }
 
 func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.transport.Close()
 }
 
