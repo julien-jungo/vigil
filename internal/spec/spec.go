@@ -45,8 +45,11 @@ func Load(dir string) ([]Spec, error) {
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
-		rel, _ := filepath.Rel(dir, path)
-		spec.ID = strings.TrimSuffix(rel, ".md")
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return fmt.Errorf("relative path for %s: %w", path, err)
+		}
+		spec.ID = strings.TrimSuffix(filepath.ToSlash(rel), ".md")
 		specs = append(specs, spec)
 		return nil
 	})
