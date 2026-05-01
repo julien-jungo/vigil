@@ -15,12 +15,62 @@ const (
 	maxMessageSize     = 10 * 1024 * 1024 // 10 MB — screenshots can be large
 )
 
+type msgResult struct {
+	msg *Message
+	err error
+}
+
 // It is not safe for concurrent use; synchronisation is the caller's responsibility.
 type StdioTransport struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	scanner *bufio.Scanner
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	msgs   <-chan msgResult
+	done   chan struct{}
+}
+
+func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.Reader) *StdioTransport {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
+
+	msgs := make(chan msgResult, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(msgs)
+		for {
+			if !scanner.Scan() {
+				if err := scanner.Err(); err != nil {
+					select {
+					case msgs <- msgResult{err: err}:
+					case <-done:
+					}
+				}
+				return
+			}
+			var msg Message
+			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+				select {
+				case msgs <- msgResult{err: fmt.Errorf("unmarshal message: %w", err)}:
+				case <-done:
+				}
+				return
+			}
+			select {
+			case msgs <- msgResult{msg: &msg}:
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			slog.Debug("playwright-mcp", "msg", scanner.Text())
+		}
+	}()
+
+	return &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, msgs: msgs, done: done}
 }
 
 func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioTransport, error) {
@@ -49,71 +99,64 @@ func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioT
 		return nil, fmt.Errorf("start %s: %w", bin, err)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
-
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			slog.Debug("playwright-mcp", "msg", scanner.Text())
-		}
-	}()
-
-	return &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, scanner: scanner}, nil
+	return newTransport(cmd, stdin, stdout, stderr), nil
 }
 
 func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
 	}
 	data = append(data, '\n')
 
-	for written := 0; written < len(data); {
-		n, err := t.stdin.Write(data[written:])
-		if err != nil {
-			return fmt.Errorf("write stdin: %w", err)
-		}
-		if n == 0 {
-			return fmt.Errorf("write stdin: %w", io.ErrShortWrite)
-		}
-		written += n
-	}
-	return nil
-}
-
-func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
-	ch := make(chan bool, 1)
+	errCh := make(chan error, 1)
 	go func() {
-		ch <- t.scanner.Scan()
+		for written := 0; written < len(data); {
+			n, err := t.stdin.Write(data[written:])
+			if err != nil {
+				errCh <- fmt.Errorf("write stdin: %w", err)
+				return
+			}
+			if n == 0 {
+				errCh <- fmt.Errorf("write stdin: %w", io.ErrShortWrite)
+				return
+			}
+			written += n
+		}
+		errCh <- nil
 	}()
 
 	select {
 	case <-ctx.Done():
-		_ = t.stdout.Close()
+		_ = t.stdin.Close() // unblock the write goroutine
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
+}
+
+func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
+	select {
+	case <-ctx.Done():
 		return nil, ctx.Err()
-	case more := <-ch:
-		if !more {
-			if err := t.scanner.Err(); err != nil {
-				return nil, err
-			}
+	case res, ok := <-t.msgs:
+		if !ok {
 			return nil, io.EOF
 		}
-
-		var msg Message
-		if err := json.Unmarshal(t.scanner.Bytes(), &msg); err != nil {
-			return nil, fmt.Errorf("unmarshal message: %w", err)
-		}
-		return &msg, nil
+		return res.msg, res.err
 	}
 }
 
 func (t *StdioTransport) Close() error {
-	_ = t.stdin.Close()
+	if t.done != nil {
+		close(t.done)
+	}
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+	}
+	if t.stdout != nil {
+		_ = t.stdout.Close()
+	}
 	if t.cmd == nil {
 		return nil
 	}

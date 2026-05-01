@@ -39,6 +39,9 @@ func (c *Client) Tools() []Tool {
 }
 
 func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*CallResult, error) {
+	if args == nil {
+		args = map[string]any{}
+	}
 	params, err := json.Marshal(map[string]any{
 		"name":      name,
 		"arguments": args,
@@ -73,11 +76,14 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) initialize(ctx context.Context) error {
-	params, _ := json.Marshal(map[string]any{
+	params, err := json.Marshal(map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "vigil", "version": c.version},
 	})
+	if err != nil {
+		return fmt.Errorf("marshal initialize params: %w", err)
+	}
 	if _, err := c.request(ctx, "initialize", params); err != nil {
 		return err
 	}

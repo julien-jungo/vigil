@@ -14,14 +14,7 @@ func newPipedTransport(t *testing.T) (*StdioTransport, io.Reader, *io.PipeWriter
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 
-	scanner := bufio.NewScanner(stdoutR)
-	scanner.Buffer(make([]byte, scannerInitBufSize), maxMessageSize)
-
-	transport := &StdioTransport{
-		stdin:   stdinW,
-		stdout:  stdoutR,
-		scanner: scanner,
-	}
+	transport := newTransport(nil, stdinW, stdoutR, strings.NewReader(""))
 
 	t.Cleanup(func() {
 		_ = stdinR.Close()
@@ -127,6 +120,25 @@ func TestStdioTransport_Send_ContextCancelled(t *testing.T) {
 	id := int64(1)
 	err := transport.Send(ctx, &Message{JSONRPC: jsonRPCVersion, ID: &id, Method: "tools/list"})
 	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestStdioTransport_Send_ContextCancelledDuringWrite(t *testing.T) {
+	// stdinR is never read, so io.Pipe blocks the first Write unconditionally.
+	transport, _, _ := newPipedTransport(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	id := int64(1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- transport.Send(ctx, &Message{JSONRPC: jsonRPCVersion, ID: &id, Method: "ping"})
+	}()
+
+	cancel()
+
+	if err := <-errCh; err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
