@@ -45,3 +45,16 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go build ./...
+
+  test-container:
+    name: Test container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - run: make test-container
+        env:
+          DOCKER_CACHE_FLAGS: >-
+            --cache-from=type=gha,scope=docker-vigil-test
+            --cache-to=type=gha,mode=max,scope=docker-vigil-test
