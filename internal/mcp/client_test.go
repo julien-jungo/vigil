@@ -354,7 +354,7 @@ func TestClient_cancelDuringReceive_sessionRemainsUsable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
