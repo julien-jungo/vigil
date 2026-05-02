@@ -38,8 +38,11 @@ func (m *mockTransport) Send(_ context.Context, msg *Message) error {
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, msg)
 	if msg.ID != nil && m.respIdx < len(m.responses) {
-		m.respCh <- m.responses[m.respIdx]
-		m.respIdx++
+		resp := m.responses[m.respIdx]
+		if resp.ID != nil && *resp.ID == *msg.ID {
+			m.respCh <- resp
+			m.respIdx++
+		}
 	}
 	return nil
 }
@@ -280,8 +283,11 @@ func (t *blockingReceiveTransport) Send(_ context.Context, msg *Message) error {
 	defer t.mu.Unlock()
 	t.sent = append(t.sent, msg)
 	if msg.ID != nil && t.respIdx < len(t.responses) {
-		t.respCh <- t.responses[t.respIdx]
-		t.respIdx++
+		resp := t.responses[t.respIdx]
+		if resp.ID != nil && *resp.ID == *msg.ID {
+			t.respCh <- resp
+			t.respIdx++
+		}
 	}
 	return nil
 }

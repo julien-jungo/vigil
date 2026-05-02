@@ -116,18 +116,16 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*C
 
 func (c *Client) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.closed {
+		c.mu.Unlock()
 		return nil
 	}
 	c.closed = true
-
 	for _, ch := range c.pending {
 		close(ch)
 	}
 	c.pending = make(map[int64]chan *Message)
-
+	c.mu.Unlock()
 	return c.transport.Close()
 }
 
