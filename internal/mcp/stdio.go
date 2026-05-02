@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os/exec"
 	"sync"
 	"time"
@@ -17,78 +16,131 @@ var ErrTransportClosed = errors.New("mcp: transport closed")
 
 const gracePeriod = 5 * time.Second
 
-type msgResult struct {
+type response struct {
 	msg *Message
 	err error
 }
 
-// It is not safe for concurrent use; synchronisation is the caller's responsibility.
+type request struct {
+	msg  *Message
+	done chan<- error
+	ctx  context.Context
+}
+
 type StdioTransport struct {
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	stdout    io.ReadCloser
 	stderr    io.ReadCloser
-	msgs      <-chan msgResult
-	done      chan struct{}
-	exited    chan struct{} // closed when cmd.Wait returns
+	reader    *bufio.Reader
+	writer    *bufio.Writer
+	encoder   *json.Encoder
+	requests  chan request
+	responses chan response
+	closed    chan struct{}
+	exited    chan struct{}
 	closeOnce sync.Once
-	writeMu   sync.Mutex
-	waitErr   error
+	exitErr   error
 }
 
-func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser) *StdioTransport {
-	reader := bufio.NewReader(stdout)
-
-	msgs := make(chan msgResult, 64)
-	done := make(chan struct{})
-	go func() {
-		defer close(msgs)
+func (t *StdioTransport) sendLoop() {
+	defer func() {
 		for {
-			line, err := reader.ReadBytes('\n')
-			if len(line) > 0 {
-				var msg Message
-				if jsonErr := json.Unmarshal(line, &msg); jsonErr != nil {
-					select {
-					case msgs <- msgResult{err: fmt.Errorf("unmarshal message: %w", jsonErr)}:
-					case <-done:
-					}
-					return
-				}
-				select {
-				case msgs <- msgResult{msg: &msg}:
-				case <-done:
-					return
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					select {
-					case msgs <- msgResult{err: err}:
-					case <-done:
-					}
-				}
+			select {
+			case req := <-t.requests:
+				req.done <- ErrTransportClosed
+			default:
 				return
 			}
 		}
 	}()
-
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			slog.Debug("playwright-mcp", "msg", scanner.Text())
+	for {
+		select {
+		case <-t.closed:
+			return
+		case req := <-t.requests:
+			select {
+			case <-req.ctx.Done():
+				req.done <- req.ctx.Err()
+				continue
+			default:
+				var writeErr error
+				if err := t.encoder.Encode(req.msg); err != nil {
+					writeErr = fmt.Errorf("write stdin: %w", err)
+				} else if err := t.writer.Flush(); err != nil {
+					writeErr = fmt.Errorf("write stdin: %w", err)
+				}
+				req.done <- writeErr
+				if writeErr != nil {
+					t.shutdown()
+					return
+				}
+			}
 		}
-	}()
+	}
+}
 
+func (t *StdioTransport) recvLoop() {
+	defer close(t.responses)
+	for {
+		line, err := t.reader.ReadBytes('\n')
+		if len(line) > 0 {
+			var msg Message
+			if jsonErr := json.Unmarshal(line, &msg); jsonErr != nil {
+				select {
+				case t.responses <- response{err: fmt.Errorf("unmarshal message: %w", jsonErr)}:
+				case <-t.closed:
+				}
+				return
+			}
+			select {
+			case t.responses <- response{msg: &msg}:
+			case <-t.closed:
+				return
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				select {
+				case t.responses <- response{err: err}:
+				case <-t.closed:
+				}
+			}
+			return
+		}
+	}
+}
+
+func newTransport(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser) *StdioTransport {
+	reader := bufio.NewReader(stdout)
+	writer := bufio.NewWriter(stdin)
 	exited := make(chan struct{})
-	t := &StdioTransport{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, msgs: msgs, done: done, exited: exited}
+
+	t := &StdioTransport{
+		cmd:       cmd,
+		stdin:     stdin,
+		stdout:    stdout,
+		stderr:    stderr,
+		reader:    reader,
+		writer:    writer,
+		encoder:   json.NewEncoder(writer),
+		responses: make(chan response, 64),
+		requests:  make(chan request, 64),
+		closed:    make(chan struct{}),
+		exited:    exited,
+	}
 	if cmd != nil {
 		go func() {
-			t.waitErr = cmd.Wait()
+			t.exitErr = cmd.Wait()
 			close(exited)
 		}()
 	} else {
 		close(exited)
 	}
+
+	go t.sendLoop()
+	go t.recvLoop()
+
 	return t
 }
 
@@ -121,83 +173,33 @@ func NewStdioTransport(ctx context.Context, bin string, args ...string) (*StdioT
 	return newTransport(cmd, stdin, stdout, stderr), nil
 }
 
-func (t *StdioTransport) shutdown() {
-	t.closeOnce.Do(func() {
-		close(t.done)
-		if t.stdin != nil {
-			_ = t.stdin.Close()
-		}
-		if t.stdout != nil {
-			_ = t.stdout.Close()
-		}
-		if t.stderr != nil {
-			_ = t.stderr.Close()
-		}
-	})
-}
-
-func (t *StdioTransport) kill() {
-	if t.cmd != nil && t.cmd.Process != nil {
-		_ = t.cmd.Process.Kill()
-	}
-}
-
 func (t *StdioTransport) Send(ctx context.Context, msg *Message) error {
+	done := make(chan error, 1)
 	select {
-	case <-t.done:
-		return ErrTransportClosed
-	default:
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal message: %w", err)
-	}
-	data = append(data, '\n')
-
-	errCh := make(chan error, 1)
-	go func() {
-		t.writeMu.Lock()
-		defer t.writeMu.Unlock()
-
-		for written := 0; written < len(data); {
-			n, err := t.stdin.Write(data[written:])
-			if err != nil {
-				errCh <- fmt.Errorf("write stdin: %w", err)
-				return
-			}
-			if n == 0 {
-				errCh <- fmt.Errorf("write stdin: %w", io.ErrShortWrite)
-				return
-			}
-			written += n
-		}
-		errCh <- nil
-	}()
-
-	select {
+	case t.requests <- request{msg: msg, done: done, ctx: ctx}:
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-t.done:
+	case <-t.closed:
 		return ErrTransportClosed
-	case err := <-errCh:
+	}
+
+	select {
+	case err := <-done:
 		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.closed:
+		return ErrTransportClosed
 	}
 }
 
 func (t *StdioTransport) Receive(ctx context.Context) (*Message, error) {
 	select {
-	case <-t.done:
-		return nil, ErrTransportClosed
-	default:
-	}
-
-	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-t.done:
+	case <-t.closed:
 		return nil, ErrTransportClosed
-	case res, ok := <-t.msgs:
+	case res, ok := <-t.responses:
 		if !ok {
 			return nil, io.EOF
 		}
@@ -216,5 +218,26 @@ func (t *StdioTransport) Close() error {
 		t.kill()
 		<-t.exited
 	}
-	return t.waitErr
+	return t.exitErr
+}
+
+func (t *StdioTransport) shutdown() {
+	t.closeOnce.Do(func() {
+		close(t.closed)
+		if t.stdin != nil {
+			_ = t.stdin.Close()
+		}
+		if t.stdout != nil {
+			_ = t.stdout.Close()
+		}
+		if t.stderr != nil {
+			_ = t.stderr.Close()
+		}
+	})
+}
+
+func (t *StdioTransport) kill() {
+	if t.cmd != nil && t.cmd.Process != nil {
+		_ = t.cmd.Process.Kill()
+	}
 }

@@ -6,8 +6,6 @@ import (
 	"fmt"
 )
 
-// Implementations are not required to be safe for concurrent use;
-// the Client serialises all access via its own mutex.
 type Transport interface {
 	Send(ctx context.Context, msg *Message) error
 	Receive(ctx context.Context) (*Message, error)

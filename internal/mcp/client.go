@@ -18,13 +18,20 @@ type Client struct {
 	version   string
 	nextID    int64
 	closed    bool
+	recvErr   error
+	pending   map[int64]chan *Message
 	mu        sync.Mutex
-	tmu       sync.Mutex
 }
 
-// version is the caller's build version and is reported to the server during initialisation.
 func New(ctx context.Context, transport Transport, version string) (*Client, error) {
-	client := &Client{transport: transport, version: version}
+	client := &Client{
+		transport: transport,
+		version:   version,
+		pending:   make(map[int64]chan *Message),
+	}
+
+	go client.recvLoop()
+
 	if err := client.initialize(ctx); err != nil {
 		_ = transport.Close()
 		return nil, fmt.Errorf("mcp initialize: %w", err)
@@ -33,7 +40,37 @@ func New(ctx context.Context, transport Transport, version string) (*Client, err
 		_ = transport.Close()
 		return nil, fmt.Errorf("mcp list tools: %w", err)
 	}
+
 	return client, nil
+}
+
+func (c *Client) recvLoop() {
+	for {
+		msg, err := c.transport.Receive(context.Background())
+		if err != nil {
+			c.mu.Lock()
+			if !c.closed {
+				c.closed = true
+				c.recvErr = err
+				for _, ch := range c.pending {
+					close(ch)
+				}
+				c.pending = make(map[int64]chan *Message)
+			}
+			c.mu.Unlock()
+			return
+		}
+		if msg.ID == nil {
+			continue // notification
+		}
+		c.mu.Lock()
+		ch, ok := c.pending[*msg.ID]
+		if ok {
+			ch <- msg
+			delete(c.pending, *msg.ID)
+		}
+		c.mu.Unlock()
+	}
 }
 
 func (c *Client) Tools() []Tool {
@@ -73,6 +110,7 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (*C
 	if result.IsError {
 		return nil, &ToolError{Tool: name, Content: result.Content}
 	}
+
 	return &result, nil
 }
 
@@ -84,6 +122,11 @@ func (c *Client) Close() error {
 		return nil
 	}
 	c.closed = true
+
+	for _, ch := range c.pending {
+		close(ch)
+	}
+	c.pending = make(map[int64]chan *Message)
 
 	return c.transport.Close()
 }
@@ -97,9 +140,11 @@ func (c *Client) initialize(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("marshal initialize params: %w", err)
 	}
+
 	if _, err := c.request(ctx, "initialize", params); err != nil {
 		return err
 	}
+
 	return c.notify(ctx, "notifications/initialized")
 }
 
@@ -108,28 +153,33 @@ func (c *Client) listTools(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var resp struct {
+
+	var response struct {
 		Tools []Tool `json:"tools"`
 	}
-	if err := json.Unmarshal(result, &resp); err != nil {
+	if err := json.Unmarshal(result, &response); err != nil {
 		return fmt.Errorf("unmarshal tools: %w", err)
 	}
-	c.tools = resp.Tools
+	c.tools = response.Tools
+
 	return nil
 }
 
 func (c *Client) request(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	c.mu.Lock()
 	if c.closed {
+		err := c.recvErr
 		c.mu.Unlock()
-		return nil, ErrTransportClosed
+		if err == nil {
+			err = ErrTransportClosed
+		}
+		return nil, err
 	}
 	id := c.nextID
 	c.nextID++
+	ch := make(chan *Message, 1)
+	c.pending[id] = ch
 	c.mu.Unlock()
-
-	c.tmu.Lock()
-	defer c.tmu.Unlock()
 
 	if err := c.transport.Send(ctx, &Message{
 		JSONRPC: jsonRPCVersion,
@@ -137,38 +187,36 @@ func (c *Client) request(ctx context.Context, method string, params json.RawMess
 		Method:  method,
 		Params:  params,
 	}); err != nil {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
 		return nil, fmt.Errorf("send %s: %w", method, err)
 	}
 
-	for {
-		msg, err := c.transport.Receive(ctx)
-		if err != nil {
+	select {
+	case msg, ok := <-ch:
+		if !ok {
+			c.mu.Lock()
+			err := c.recvErr
+			c.mu.Unlock()
+			if err == nil {
+				err = ErrTransportClosed
+			}
 			return nil, fmt.Errorf("receive %s: %w", method, err)
-		}
-		if msg.ID == nil {
-			continue // notification, skip
-		}
-		if *msg.ID != id {
-			return nil, fmt.Errorf("receive %s: unexpected response id %d (want %d)", method, *msg.ID, id)
 		}
 		if msg.Error != nil {
 			return nil, msg.Error
 		}
 		return msg.Result, nil
+	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, ctx.Err()
 	}
 }
 
 func (c *Client) notify(ctx context.Context, method string) error {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return ErrTransportClosed
-	}
-	c.mu.Unlock()
-
-	c.tmu.Lock()
-	defer c.tmu.Unlock()
-
 	return c.transport.Send(ctx, &Message{
 		JSONRPC: jsonRPCVersion,
 		Method:  method,

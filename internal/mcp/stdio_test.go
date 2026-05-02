@@ -175,28 +175,20 @@ func TestStdioTransport_Send_ContextCancelledLeavesTransportUsable(t *testing.T)
 	}()
 
 	scanner := bufio.NewScanner(stdinR)
-	var lines []string
-	for len(lines) < 2 && scanner.Scan() {
-		lines = append(lines, scanner.Text())
+	if !scanner.Scan() {
+		t.Fatal("expected a line from stdin pipe")
 	}
 
 	if err := <-errCh; err != nil {
 		t.Fatalf("second Send: %v", err)
 	}
 
-	foundToolsList := false
-	for _, line := range lines {
-		var m Message
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("unmarshal line %q: %v", line, err)
-		}
-		if m.Method == "tools/list" {
-			foundToolsList = true
-		}
+	var m Message
+	if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-
-	if !foundToolsList {
-		t.Errorf("Method \"tools/list\" not found in lines: %v", lines)
+	if m.Method != "tools/list" {
+		t.Errorf("Method = %q, want tools/list", m.Method)
 	}
 }
 
